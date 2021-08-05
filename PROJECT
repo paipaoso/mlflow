@@ -1,5 +1,5 @@
 domain: xiaomi.com
-repo: github.com/xiaomi/mlflow
+repo: github.com/paipaoso/mlflow
 resources:
 - group: cloudml
   kind: Mlflow

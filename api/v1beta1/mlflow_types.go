@@ -29,6 +29,11 @@ import (
 type MlflowSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
+	Framework         string   `json:"framework,omitempty"`
+	APIVersion        string   `json:"apiVersion,omitempty"`
+	PriorityClassName string   `json:"priorityclassname,omitempty"`
+	Command           []string `json:"command,omitempty"`
+	Image             string   `json:"image,omitempty"`
 
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 	// +optional
@@ -52,11 +57,12 @@ type MlflowSpec struct {
 }
 
 // MlflowStatus defines the observed state of Mlflow
+// +kubebuilder:subresource:status
+
 type MlflowStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
-	Condition appsv1.DeploymentCondition `json:"condition,omitempty"`
-	URI       string                     `json:"uri,omitempty"`
+	Condition []appsv1.DeploymentCondition `json:"condition,omitempty"`
 
 	TrainsRecord map[string][]string `json:"trainsrecord,omitempty"`
 	Experiments  []string            `json:"experiments,omitempty"`
@@ -71,6 +77,7 @@ type Mlflow struct {
 
 	Spec   MlflowSpec   `json:"spec,omitempty"`
 	Status MlflowStatus `json:"status,omitempty"`
+	URI    string       `json:"uri,omitempty"`
 }
 
 // +kubebuilder:object:root=true

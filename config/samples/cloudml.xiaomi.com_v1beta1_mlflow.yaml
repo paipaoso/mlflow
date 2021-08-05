@@ -5,6 +5,7 @@ metadata:
     priority_class: "best-effort"
     ml-project: "project-sample"
   annotations:
+    ingress-postfix: .local
   # code-scheme: "git"
   # priorityClassName: "best-effort"
   name: namespaced-metrics

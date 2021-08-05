@@ -19,6 +19,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
@@ -28,13 +29,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
 	//	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	cloudmlv1beta1 "github.com/xiaomi/mlflow/api/v1beta1"
+	cloudmlv1beta1 "github.com/paipaoso/mlflow/api/v1beta1"
 )
 
 // MlflowReconciler reconciles a Mlflow object
@@ -48,8 +50,7 @@ type MlflowReconciler struct {
 // +kubebuilder:rbac:groups=cloudml.xiaomi.com,resources=mlflows,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=cloudml.xiaomi.com,resources=mlflows/status,verbs=get;update;patch
 
-func (r *MlflowReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
-	ctx := context.Background()
+func (r *MlflowReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 
 	log := r.Log.WithValues("mlflow", req.NamespacedName)
 	var Mlflow_image = "cr.d.xiaomi.net/cloud-ml/cloudml-metrics:v1"
@@ -65,7 +66,16 @@ func (r *MlflowReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		// Error reading the object - requeue the request.
 		return ctrl.Result{}, err
 	}
-	command := []string{"bash", "-c", "mlflow server --backend-store-uri " + instance.Spec.Source + " --default-artifact-root " + instance.Spec.ArtifactRoot}
+	command := "mlflow server -h 0.0.0.0"
+	if instance.Spec.Source != "" {
+		command = command + " --backend-store-uri " + instance.Spec.Source
+	}
+	if instance.Spec.ArtifactRoot != "" {
+		command = command + " --default-artifact-root " + instance.Spec.ArtifactRoot
+	}
+
+	commands := []string{"bash", "-c", command}
+
 	podtemplete := corev1.PodTemplateSpec{
 		ObjectMeta: metav1.ObjectMeta{
 			Labels:      instance.Labels,
@@ -77,7 +87,7 @@ func (r *MlflowReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 					Name:            "mlflow",
 					Image:           Mlflow_image,
 					ImagePullPolicy: "Always",
-					Command:         command,
+					Command:         commands,
 					Env:             instance.Spec.Env,
 					Resources:       instance.Spec.Resources,
 					VolumeMounts:    instance.Spec.VolumeMounts,
@@ -87,14 +97,7 @@ func (r *MlflowReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 			Affinity: instance.Spec.Affinity,
 		},
 	}
-	labelselector := ""
-	for key, value := range instance.Labels {
-		labelselector = labelselector + key + "=" + value
-
-	}
-
-	log.Info("===", "ssd", labelselector)
-	Labelselector := &metav1.LabelSelector{
+	Labelselectors := &metav1.LabelSelector{
 		MatchLabels: instance.Labels,
 	}
 
@@ -106,7 +109,7 @@ func (r *MlflowReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		},
 		Spec: appsv1.DeploymentSpec{
 			Template: podtemplete,
-			Selector: Labelselector,
+			Selector: Labelselectors,
 		},
 	}
 
@@ -114,25 +117,65 @@ func (r *MlflowReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		log.Error(err, "Reconcile Set controller ref deployment", "deploy", instance)
 		return ctrl.Result{}, err
 	}
-	found := &appsv1.Deployment{}
-	err = r.Get(ctx, req.NamespacedName, found)
+	founddeploy := &appsv1.Deployment{}
+	err = r.Get(ctx, req.NamespacedName, founddeploy)
 	if err != nil && errors.IsNotFound(err) {
 		log.Info("Creating Deployment", "namespace", deploy.Namespace, "deployment", deploy.Name)
 		err := r.Create(ctx, deploy)
-		return ctrl.Result{}, err
+		if err != nil {
+			log.Error(err, "Creating deploy", "namespace", deploy.Namespace, "deploy", deploy.Name)
+			return ctrl.Result{}, err
+		}
+
 	} else if err != nil {
 		log.Error(err, "Creating deploy", "namespace", deploy.Namespace, "deploy", deploy.Name)
 		r.Recorder.Event(instance, "Error", "FailedCreateDeploy", fmt.Sprintf("Failed Creat Deploy %s", instance.Name))
 		return ctrl.Result{}, err
 	}
-	r.Recorder.Event(instance, "Normal", "SuccessfulCreatedeployment", fmt.Sprintf("Created deployment %s", instance.Name))
+	found := &cloudmlv1beta1.Mlflow{}
+	err = r.Get(ctx, req.NamespacedName, found)
+	if err != nil {
+		// Error reading the object - requeue the request.
+		log.Error(err, "reconcile error when fetch mlflow")
+		return ctrl.Result{}, err
+	}
+	if len(founddeploy.Status.Conditions) != 0 {
+		found.Status.Condition = founddeploy.Status.Conditions
+	}
 
+	uri := instance.Name + "-" + instance.Annotations["ingress-postfix"]
+	if found.URI != uri {
+		found.URI = uri
+		err = r.Update(ctx, found)
+		if err != nil {
+			log.Error(err, "reconcile error when update status")
+			return ctrl.Result{}, err
+		}
+	}
+	r.Recorder.Event(instance, "Normal", "SuccessfulCreatedeployment", fmt.Sprintf("Created deployment %s", instance.Name))
+	pods := &corev1.PodList{}
+	label := []string{}
+	for key, value := range founddeploy.ObjectMeta.Labels {
+		label = append(label, key+"="+value)
+	}
+	labelSelector, _ := labels.Parse(strings.Join(label, ","))
+	listOpts := &client.ListOptions{LabelSelector: labelSelector}
+	err = r.List(ctx, pods, listOpts)
+	if err != nil {
+		log.Error(err, "List pods", "namespace", found.Namespace, "deployment name", found.Name)
+		// NOTE(xychu): maybe we could not reconcile err when list pods err,
+		//              since it's only needed for debug
+		// return reconcile.Result{}, err
+	}
+	// podInfos := []cloudmlv1beta1.PodInfo{}
+
+	pod := pods.Items[0]
 	service := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        instance.Name,
-			Namespace:   instance.Namespace,
-			Labels:      deploy.Labels,
-			Annotations: deploy.Annotations,
+			Name:        pod.Name,
+			Namespace:   pod.Namespace,
+			Labels:      pod.Labels,
+			Annotations: pod.Annotations,
 		},
 		Spec: corev1.ServiceSpec{
 			Type: corev1.ServiceTypeClusterIP,
@@ -147,7 +190,7 @@ func (r *MlflowReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 					},
 				},
 			},
-			Selector: deploy.Labels,
+			Selector: pod.Labels,
 		},
 	}
 	if err := ctrl.SetControllerReference(instance, service, r.Scheme); err != nil {
@@ -166,10 +209,10 @@ func (r *MlflowReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 
 	ingress := &v1beta1.Ingress{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        instance.Name,
-			Namespace:   instance.Namespace,
-			Labels:      instance.Labels,
-			Annotations: deploy.Annotations,
+			Name:        pod.Name,
+			Namespace:   pod.Namespace,
+			Labels:      pod.Labels,
+			Annotations: pod.Annotations,
 		},
 		Spec: v1beta1.IngressSpec{
 			Rules: []v1beta1.IngressRule{
@@ -180,7 +223,7 @@ func (r *MlflowReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 							Paths: []v1beta1.HTTPIngressPath{
 								{
 									Backend: v1beta1.IngressBackend{
-										ServiceName: instance.Name,
+										ServiceName: pod.Name,
 										ServicePort: intstr.FromInt(5000),
 									},
 								},
@@ -203,7 +246,7 @@ func (r *MlflowReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 			return ctrl.Result{}, err
 		}
 	}
-	r.Recorder.Event(instance, "Normal", "SuccessfulCreateIngress", fmt.Sprintf("Created ingress %s for tensorboard service", ingress.Name))
+	r.Recorder.Event(instance, "Normal", "SuccessfulCreateIngress", fmt.Sprintf("Created ingress %s for mlflow service", ingress.Name))
 	log.Info("ingress", "successfully create ingress", ingress.Name)
 
 	return ctrl.Result{}, nil
