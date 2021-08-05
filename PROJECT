@@ -1,0 +1,7 @@
+domain: xiaomi.com
+repo: github.com/xiaomi/mlflow
+resources:
+- group: cloudml
+  kind: Mlflow
+  version: v1beta1
+version: "2"

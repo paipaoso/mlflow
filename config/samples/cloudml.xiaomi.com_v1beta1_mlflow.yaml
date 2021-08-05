@@ -1,0 +1,21 @@
+apiVersion: cloudml.xiaomi.com/v1beta1
+kind: Mlflow
+metadata:
+  labels:
+    priority_class: "best-effort"
+    ml-project: "project-sample"
+  annotations:
+  # code-scheme: "git"
+  # priorityClassName: "best-effort"
+  name: namespaced-metrics
+  namespace: test-ns
+spec:
+  resource:
+    limits:
+      cpu: 1
+      memory: "500m"
+    requests:
+      cpu: 1
+      memory: "500m"
+  source: "/scource"
+
