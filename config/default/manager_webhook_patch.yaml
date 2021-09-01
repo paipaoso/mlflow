@@ -1,8 +1,8 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: controller-manager
-  namespace: system
+  name: controller-manager-mlflow
+  namespace: kube-systemsystem
 spec:
   template:
     spec:

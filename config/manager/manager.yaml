@@ -2,25 +2,25 @@ apiVersion: v1
 kind: Namespace
 metadata:
   labels:
-    control-plane: controller-manager
+    control-plane: controller-manager-mlflow
   name: system
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: controller-manager
+  name: controller-manager-mlflow
   namespace: system
   labels:
-    control-plane: controller-manager
+    control-plane: controller-manager-mlflow
 spec:
   selector:
     matchLabels:
-      control-plane: controller-manager
+      control-plane: controller-manager-mlflow
   replicas: 1
   template:
     metadata:
       labels:
-        control-plane: controller-manager
+        control-plane: controller-manager-mlflow
     spec:
       containers:
       - command:
